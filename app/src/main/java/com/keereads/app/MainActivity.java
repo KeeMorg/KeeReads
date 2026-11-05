@@ -360,7 +360,9 @@ public final class MainActivity extends Activity implements PdfSurface.Listener 
         status.setText("Exporting PDF…");
         new Thread(()->{
             try(ParcelFileDescriptor fd=getContentResolver().openFileDescriptor(source,"r");
-                PdfRenderer reader=new PdfRenderer(fd);PdfDocument out=new PdfDocument()){
+                PdfRenderer reader=new PdfRenderer(fd)){
+                PdfDocument out=new PdfDocument();
+                try {
                 for(int i=0;i<reader.getPageCount();i++){
                     try(PdfRenderer.Page src=reader.openPage(i)){
                         int w=Math.max(1,src.getWidth()),h=Math.max(1,src.getHeight());
@@ -379,6 +381,9 @@ public final class MainActivity extends Activity implements PdfSurface.Listener 
                     if(output==null)throw new Exception("Cannot open destination");out.writeTo(output);
                 }
                 runOnUiThread(()->{status.setText("Export complete");toast("Annotated PDF saved");});
+                } finally {
+                    out.close();
+                }
             }catch(Exception e){runOnUiThread(()->{status.setText("Export failed");toast("Export failed: "+e.getMessage());});}
         },"KeeReads-Export").start();
     }
