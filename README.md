@@ -1,3 +1,9 @@
+# Kee Reads v0.2.0 — redesigned Android PDF reader
+
+**What changed:** see `UI_CHANGELOG.md`. New compact reader navigation, bottom annotation dock, contextual color strip, and tools/options sheets.
+
+**Build status:** Java syntax/project structure validated locally; build with GitHub Actions to generate and test the APK.
+
 # Kee Reads
 
 **A native, offline-first Android PDF reader and annotation prototype.**
