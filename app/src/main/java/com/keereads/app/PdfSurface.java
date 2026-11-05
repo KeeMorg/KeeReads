@@ -18,8 +18,12 @@ import android.view.View;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /** Canvas-based paginated reader and normalized annotation overlay. */
 public final class PdfSurface extends View {
@@ -27,7 +31,11 @@ public final class PdfSurface extends View {
     public enum Tool {PAN,PEN,HIGHLIGHT,UNDERLINE,WAVE,ERASER,SELECT,TEXT,EXACT}
     public enum Mode {CONTINUOUS,SINGLE,SPREAD}
     public enum Theme {WHITE,SEPIA,DARK}
-    private PdfRenderer renderer;
+    private volatile PdfRenderer renderer;
+    private volatile int documentGeneration=0;
+    private final ExecutorService pageRenderWorker=Executors.newSingleThreadExecutor();
+    // Modified only on the UI thread; worker results are marshalled back using post().
+    private final Set<Integer> pagesBeingRendered=new HashSet<>();
     private Annotations annotations;
     private Listener listener;
     private Tool tool=Tool.PAN;
@@ -67,6 +75,8 @@ public final class PdfSurface extends View {
     private float dp(float n){return n*getResources().getDisplayMetrics().density;}
     public void setListener(Listener l){listener=l;}
     public void open(PdfRenderer r,Annotations a){
+        documentGeneration++;
+        pagesBeingRendered.clear();
         bitmapCache.evictAll();renderer=r;annotations=a;currentPage=0;zoom=1;panX=panY=0;
         pageDimensions.clear();pageRects.clear();searchMatches.clear();selected=null;
         if(r!=null)for(int i=0;i<r.getPageCount();i++){
@@ -169,16 +179,44 @@ public final class PdfSurface extends View {
         cv.restore();
     }
     private Bitmap getBitmap(int i){
-        Bitmap b=bitmapCache.get(i);if(b!=null&&!b.isRecycled())return b;
-        if(renderer==null)return null;
-        try { synchronized(renderer){try(PdfRenderer.Page page=renderer.openPage(i)){
-            int w=Math.max(1,page.getWidth()),h=Math.max(1,page.getHeight());
-            float s=Math.min(2.4f,1800f/w);int rw=Math.max(1,Math.round(w*s)),rh=Math.max(1,Math.round(h*s));
-            float max=2800000f;if((float)rw*rh>max){float f=(float)Math.sqrt(max/((float)rw*rh));rw=Math.max(1,Math.round(rw*f));rh=Math.max(1,Math.round(rh*f));}
-            b=Bitmap.createBitmap(rw,rh,Bitmap.Config.ARGB_8888);b.eraseColor(Color.WHITE);
-            page.render(b,null,null,PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY);
-            bitmapCache.put(i,b);return b;
-        }}}catch(Exception e){return null;}
+        Bitmap cached=bitmapCache.get(i);
+        if(cached!=null && !cached.isRecycled())return cached;
+        final PdfRenderer source=renderer;
+        if(source==null || !pagesBeingRendered.add(i))return null;
+        final int generation=documentGeneration;
+        pageRenderWorker.execute(()->{
+            Bitmap result=null;
+            try {
+                synchronized(source) {
+                    if (renderer==source && documentGeneration==generation) {
+                        try (PdfRenderer.Page page=source.openPage(i)) {
+                            int w=Math.max(1,page.getWidth()),h=Math.max(1,page.getHeight());
+                            float factor=Math.min(2.4f,1800f/w);
+                            factor=Math.min(factor,(float)Math.sqrt(2800000d/((double)w*h)));
+                            int rw=Math.max(1,Math.round(w*factor));
+                            int rh=Math.max(1,Math.round(h*factor));
+                            result=Bitmap.createBitmap(rw,rh,Bitmap.Config.ARGB_8888);
+                            result.eraseColor(Color.WHITE);
+                            page.render(result,null,null,PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY);
+                        }
+                    }
+                }
+            }catch(Exception ignored){}
+            final Bitmap ready=result;
+            post(()->{
+                if (source==renderer && generation==documentGeneration) {
+                    pagesBeingRendered.remove(i);
+                    if(ready!=null){bitmapCache.put(i,ready);invalidate();}
+                } else if(ready!=null && !ready.isRecycled())ready.recycle();
+            });
+        });
+        return null;
+    }
+    public void release(){
+        documentGeneration++;
+        pageRenderWorker.shutdownNow();
+        bitmapCache.evictAll();
+        pagesBeingRendered.clear();
     }
     public Bitmap thumbnail(int i){if(renderer==null)return null;
         try { synchronized(renderer){try(PdfRenderer.Page page=renderer.openPage(i)){

@@ -62,13 +62,21 @@ final class Annotations {
     }
     private void save(){
         File temp=new File(file.getParentFile(),file.getName()+".tmp");
-        try(FileOutputStream out=new FileOutputStream(temp)){
-            out.write(state.toString().getBytes(StandardCharsets.UTF_8));out.getFD().sync();
-            if(!temp.renameTo(file)) {
-                try(FileOutputStream direct=new FileOutputStream(file)) {direct.write(state.toString().getBytes(StandardCharsets.UTF_8)); direct.getFD().sync();}
+        try {
+            try (FileOutputStream out = new FileOutputStream(temp)) {
+                out.write(state.toString().getBytes(StandardCharsets.UTF_8));
+                out.getFD().sync();
+            }
+            if (!temp.renameTo(file)) {
+                try (FileOutputStream direct = new FileOutputStream(file)) {
+                    direct.write(state.toString().getBytes(StandardCharsets.UTF_8));
+                    direct.getFD().sync();
+                }
                 temp.delete();
             }
-        }catch(Exception ignored){}
+        } catch (Exception ignored) {
+            // Keep the last intact sidecar if disk writes fail.
+        }
     }
     int getLastPage(){return state.optInt("lastPage",0);}
     void setLastPage(int page){try{state.put("lastPage",page);save();}catch(JSONException ignored){}}
@@ -76,18 +84,37 @@ final class Annotations {
     Set<Integer> bookmarks(){return new HashSet<>(bookmarks);}
     void toggleBookmark(int page){
         beforeEdit();if(!bookmarks.add(page))bookmarks.remove(page);
-        JSONArray array=new JSONArray();for(int p:bookmarks)array.put(p);
+        JSONArray array=new JSONArray();
+        java.util.ArrayList<Integer> sorted = new java.util.ArrayList<>(bookmarks);
+        java.util.Collections.sort(sorted);
+        for (int p : sorted) array.put(p);
         try{state.put("bookmarks",array);save();}catch(JSONException ignored){}
     }
-    void add(Item item){beforeEdit();state.optJSONArray("items").put(item.json);save();}
+    void add(Item item){
+        JSONArray items=state.optJSONArray("items");
+        if (items==null) return;
+        beforeEdit();items.put(item.json);save();
+    }
     void remove(Item item){beforeEdit();
         JSONArray old=state.optJSONArray("items"), next=new JSONArray();
-        for(int i=0;i<old.length();i++)if(!item.id().equals(old.optJSONObject(i).optString("id")))next.put(old.opt(i));
+        if (old==null) return;
+        for (int i=0;i<old.length();i++) {
+            JSONObject candidate=old.optJSONObject(i);
+            if (candidate==null || !item.id().equals(candidate.optString("id"))) next.put(old.opt(i));
+        }
         try{state.put("items",next);save();}catch(JSONException ignored){}
     }
-    void replace(Item item){beforeEdit();JSONArray a=state.optJSONArray("items");
-        for(int i=0;i<a.length();i++) if(item.id().equals(a.optJSONObject(i).optString("id"))) {try{a.put(i,item.json);}catch(JSONException ignored){}break;}
-        save();
+    void replace(Item item){
+        JSONArray a=state.optJSONArray("items");
+        if (a==null) return;
+        for (int i=0;i<a.length();i++) {
+            JSONObject old=a.optJSONObject(i);
+            if (old!=null && item.id().equals(old.optString("id"))) {
+                beforeEdit();
+                try { a.put(i,item.json);save(); } catch (JSONException ignored) {}
+                break;
+            }
+        }
     }
     boolean undo(){if(undo.isEmpty())return false;redo.push(state.toString());
         try{state=new JSONObject(undo.pop());syncBookmarks();save();return true;}catch(Exception ignored){return false;}}
@@ -117,7 +144,14 @@ final class Annotations {
         String answer(){return json.optString("answer","");}
         void setAnswer(String s){try{json.put("answer",s);}catch(JSONException ignored){}}
         void addBox(RectF box){JSONArray arr=json.optJSONArray("boxes");if(arr==null){arr=new JSONArray();try{json.put("boxes",arr);}catch(JSONException ignored){}}
-            JSONArray coordinates=new JSONArray();coordinates.put(box.left);coordinates.put(box.top);coordinates.put(box.right);coordinates.put(box.bottom);arr.put(coordinates);
+            JSONArray coordinates=new JSONArray();
+            try {
+                coordinates.put(box.left);
+                coordinates.put(box.top);
+                coordinates.put(box.right);
+                coordinates.put(box.bottom);
+            } catch (JSONException ignored) { return; }
+            arr.put(coordinates);
         }
         List<RectF> boxes(){List<RectF> out=new ArrayList<>();JSONArray a=json.optJSONArray("boxes");if(a!=null)for(int i=0;i<a.length();i++){
             JSONArray box=a.optJSONArray(i);if(box!=null)out.add(new RectF((float)box.optDouble(0),(float)box.optDouble(1),(float)box.optDouble(2),(float)box.optDouble(3)));
@@ -137,8 +171,14 @@ final class Annotations {
                 }catch(JSONException ignored){}
             }
         }
-        void add(float x,float y){JSONArray p=new JSONArray();p.put(Math.max(0,Math.min(1,x)));p.put(Math.max(0,Math.min(1,y)));
-            json.optJSONArray("points").put(p);}
+        void add(float x,float y){
+            JSONArray p=new JSONArray();
+            try {
+                p.put(Math.max(0,Math.min(1,x)));
+                p.put(Math.max(0,Math.min(1,y)));
+            } catch (JSONException ignored) { return; }
+            json.optJSONArray("points").put(p);
+        }
         List<PointF> points(){List<PointF> pts=new ArrayList<>();JSONArray a=json.optJSONArray("points");
             if(a!=null)for(int i=0;i<a.length();i++) {JSONArray p=a.optJSONArray(i);if(p!=null)pts.add(new PointF((float)p.optDouble(0),(float)p.optDouble(1)));}
             return pts;

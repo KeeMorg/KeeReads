@@ -41,7 +41,7 @@
 | 35 | Flashcard creation | Partial | Android 15+ selected-text cards, basic review only |
 | 36 | Study mode | Partial | Notes/cards lists, not dedicated full study mode |
 | 37 | Distraction-free reading | Planned | Toolbars remain visible |
-| 38 | Fast PDF rendering | Partial | Page bitmap cache, not stress tested |
+| 38 | Fast PDF rendering | Partial | Worker-rendered page bitmap cache, not stress tested |
 | 39 | Smooth zooming | Partial | Gesture zoom with pre-rendered bitmaps; high zoom loses sharpness |
 | 40 | Floating annotation toolbar | Planned | Fixed bottom horizontal toolbar |
 | 41 | Customizable toolbar | Planned | Tools are scrollable but not rearrangeable |

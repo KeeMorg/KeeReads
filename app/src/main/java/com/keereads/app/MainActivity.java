@@ -86,6 +86,20 @@ public final class MainActivity extends Activity implements PdfSurface.Listener 
     }
     private void setupUi(){
         root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setBackgroundColor(Color.WHITE);setContentView(root);
+        if (Build.VERSION.SDK_INT >= 35) {
+            root.setOnApplyWindowInsetsListener((view, insets) -> {
+                android.graphics.Insets bars = insets.getInsets(android.view.WindowInsets.Type.systemBars());
+                root.setPadding(bars.left,bars.top,bars.right,bars.bottom);
+                return insets;
+            });
+            root.requestApplyInsets();
+            android.view.WindowInsetsController controller=getWindow().getInsetsController();
+            if (controller!=null) {
+                int lightBars=android.view.WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
+                    | android.view.WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS;
+                controller.setSystemBarsAppearance(lightBars, lightBars);
+            }
+        }
         LinearLayout header=new LinearLayout(this);header.setBackgroundColor(NAVY);header.setGravity(Gravity.CENTER_VERTICAL);header.setPadding(dp(14),dp(6),dp(10),dp(6));
         LinearLayout heading=new LinearLayout(this);heading.setOrientation(LinearLayout.VERTICAL);
         TextView title=label("Kee Reads",21,Color.WHITE,true);fileTitle=label("Offline PDF reader",11,0xFFCBD5FF,false);
@@ -150,15 +164,24 @@ public final class MainActivity extends Activity implements PdfSurface.Listener 
     }
     private String getDisplayName(Uri uri){
         try(Cursor c=getContentResolver().query(uri,new String[]{OpenableColumns.DISPLAY_NAME},null,null,null)){
-            if(c!=null&&c.moveToFirst())return c.getString(0);
-        }catch(Exception ignored){}return "Document.pdf";
+            if(c!=null && c.moveToFirst()){
+                String name=c.getString(0);
+                if(name!=null && !name.trim().isEmpty())return name;
+            }
+        }catch(Exception ignored){}
+        return "Document.pdf";
     }
     private void openDocument(Uri uri){
+        ParcelFileDescriptor descriptor=null;
+        PdfRenderer newRenderer=null;
         try{
-            ParcelFileDescriptor descriptor=getContentResolver().openFileDescriptor(uri,"r");
+            descriptor=getContentResolver().openFileDescriptor(uri,"r");
             if(descriptor==null)throw new Exception("Document unavailable");
-            PdfRenderer newRenderer=new PdfRenderer(descriptor);
-            if(renderer!=null){surface.open(null,null);renderer.close();}
+            newRenderer=new PdfRenderer(descriptor);
+            if(renderer!=null){
+                surface.open(null,null);
+                synchronized(renderer){renderer.close();}
+            }
             if(openDescriptor!=null)try{openDescriptor.close();}catch(Exception ignored){}
             renderer=newRenderer;openDescriptor=descriptor;documentUri=uri;notes=new Annotations(this,uri.toString());
             surface.open(renderer,notes);
@@ -166,7 +189,16 @@ public final class MainActivity extends Activity implements PdfSurface.Listener 
             getPreferences(MODE_PRIVATE).edit().putString("last_pdf",uri.toString()).apply();
             int page=Math.max(0,Math.min(notes.getLastPage(),renderer.getPageCount()-1));
             surface.post(()->surface.setPage(page));onPageChanged(page);
-        }catch(Exception ex){toast("Couldn't open PDF: "+ex.getMessage());getPreferences(MODE_PRIVATE).edit().remove("last_pdf").apply();}
+        }catch(Exception ex){
+            if(newRenderer!=null && newRenderer!=renderer){
+                try{newRenderer.close();}catch(Exception ignored){}
+            }
+            if(descriptor!=null && descriptor!=openDescriptor){
+                try{descriptor.close();}catch(Exception ignored){}
+            }
+            toast("Couldn't open PDF: "+ex.getMessage());
+            getPreferences(MODE_PRIVATE).edit().remove("last_pdf").apply();
+        }
     }
     private void toast(String s){Toast.makeText(this,s,Toast.LENGTH_LONG).show();}
     private boolean requireDoc(){if(renderer==null){toast("Open a PDF first");return false;}return true;}
@@ -368,11 +400,17 @@ public final class MainActivity extends Activity implements PdfSurface.Listener 
                         int w=Math.max(1,src.getWidth()),h=Math.max(1,src.getHeight());
                         PdfDocument.Page page=out.startPage(new PdfDocument.PageInfo.Builder(w,h,i+1).create());
                         Canvas cv=page.getCanvas();cv.drawColor(Color.WHITE);
-                        int rw=Math.min(1650,w*2),rh=Math.max(1,Math.round(rw*(float)h/w));
-                        Bitmap bitmap=Bitmap.createBitmap(rw,rh,Bitmap.Config.ARGB_8888);bitmap.eraseColor(Color.WHITE);
-                        src.render(bitmap,null,null,PdfRenderer.Page.RENDER_MODE_FOR_PRINT);
-                        Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);
-                        cv.drawBitmap(bitmap,null,new RectF(0,0,w,h),paint);bitmap.recycle();
+                        float scale=Math.min(2f,1650f/w);
+                        scale=Math.min(scale,(float)Math.sqrt(3000000d/((double)w*h)));
+                        int rw=Math.max(1,Math.round(w*scale));
+                        int rh=Math.max(1,Math.round(h*scale));
+                        Bitmap bitmap=Bitmap.createBitmap(rw,rh,Bitmap.Config.ARGB_8888);
+                        try {
+                            bitmap.eraseColor(Color.WHITE);
+                            src.render(bitmap,null,null,PdfRenderer.Page.RENDER_MODE_FOR_PRINT);
+                            Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);
+                            cv.drawBitmap(bitmap,null,new RectF(0,0,w,h),paint);
+                        } finally { bitmap.recycle(); }
                         for(Annotations.Item item:snapshot)if(item.page()==i)item.draw(cv,w,h,false);
                         out.finishPage(page);
                     }
@@ -387,7 +425,14 @@ public final class MainActivity extends Activity implements PdfSurface.Listener 
             }catch(Exception e){runOnUiThread(()->{status.setText("Export failed");toast("Export failed: "+e.getMessage());});}
         },"KeeReads-Export").start();
     }
-    @Override protected void onDestroy(){super.onDestroy();if(renderer!=null){surface.open(null,null);renderer.close();renderer=null;}
+    @Override protected void onDestroy(){
+        if(renderer!=null){
+            surface.open(null,null);
+            synchronized(renderer){renderer.close();}
+            renderer=null;
+        }
         if(openDescriptor!=null)try{openDescriptor.close();}catch(Exception ignored){}
+        surface.release();
+        super.onDestroy();
     }
 }

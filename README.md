@@ -2,7 +2,7 @@
 
 **A native, offline-first Android PDF reader and annotation prototype.**
 
-Package: `com.keereads.app` · Version `0.1.0` · Minimum Android 7.0 (API 24) · Android Studio / Java 17 · Target Android 15 (API 35).
+Package: `com.keereads.app` · Version `0.1.1` · Minimum Android 7.0 (API 24) · Android Studio / Java 17 · Target Android 15 (API 35).
 
 > **Important:** This is the actual Android Studio **source project**, not an APK and not a finished implementation of the entire 43-feature specification. It has not been built or tested on an Android device in the generation environment because Android SDK and Gradle were not installed, and network access there was unavailable. Treat it as an unverified prototype requiring a real build and functional QA.
 
@@ -48,3 +48,9 @@ The 43-feature checklist is inventoried in `FEATURES.md` with status. Not yet im
 - Export creates a **new** file; it does not overwrite the original, but the export can be large and slower for lengthy documents.
 - Performance, memory use, compatibility with encrypted PDFs, crash resilience, accessibility, and annotation correctness have **not been device-tested**.
 - This is not a production app and shouldn't be distributed as a trusted finished reader without compiling, running on actual devices, testing with real PDFs, and resolving issues identified there.
+
+## Latest source audit (v0.1.1)
+
+This package includes fixes for the prior GitHub compilation errors and additional resource, save, render-thread, and export improvements. See `AUDIT.md` for checks performed, exact limitations, and a post-build smoke-test plan. Use `BUILD_ON_GITHUB.md` to replace the entire repository in a single commit. Android compilation and device QA are still outstanding.
+
+**Debug build upgrades:** GitHub-hosted debug APKs may be signed with different generated debug certificates on different runs. Android may refuse to install a newer APK over an old one. Avoid uninstalling a build containing valuable annotations without backing up the annotated exports; app-private sidecar annotations can be lost on uninstall.
